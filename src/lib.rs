@@ -12,16 +12,16 @@ use std::fs;
 use std::path::Path as StdPath;
 use std::sync::RwLock;
 use syn::{
-    parse::Parse, parse::ParseStream, parse_macro_input,
-    Attribute, Data, DataStruct, DeriveInput, Expr, ExprLit, Field, Fields, Lit, Meta,
-    MetaList, MetaNameValue, Path, Type, TypePath,
+    parse::Parse, parse::ParseStream, parse_macro_input, Attribute, Data, DataStruct, DeriveInput,
+    Expr, ExprLit, Field, Fields, Lit, Meta, MetaList, MetaNameValue, Path, Type, TypePath,
 };
 use tabled::{Table, Tabled};
 
 // Global registry for struct definitions and file-specific pending generations
 lazy_static! {
     static ref STRUCT_REGISTRY: RwLock<HashMap<String, StructInfo>> = RwLock::new(HashMap::new());
-    static ref FILE_PENDING_GENERATIONS: RwLock<HashMap<String, Vec<PendingGeneration>>> = RwLock::new(HashMap::new());
+    static ref FILE_PENDING_GENERATIONS: RwLock<HashMap<String, Vec<PendingGeneration>>> =
+        RwLock::new(HashMap::new());
 }
 
 /// Information about a pending documentation generation
@@ -126,7 +126,7 @@ fn generate_config_docs(input: &DeriveInput, args: &ConfigDocsArgs) -> syn::Resu
         let mut file_pending = FILE_PENDING_GENERATIONS.write().unwrap();
         file_pending
             .entry(args.target.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(PendingGeneration {
                 struct_info,
                 args: args.clone(),
@@ -167,11 +167,11 @@ fn can_generate_immediately(struct_info: &StructInfo) -> syn::Result<bool> {
 /// Try to process any pending generations that now have all dependencies available
 fn try_process_pending_generations() -> syn::Result<()> {
     let mut file_pending = FILE_PENDING_GENERATIONS.write().unwrap();
-    
+
     // Process each target file independently
     for (_target_file, pending_list) in file_pending.iter_mut() {
         let mut remaining_pending = Vec::new();
-        
+
         for pending_gen in pending_list.drain(..) {
             if can_generate_immediately(&pending_gen.struct_info)? {
                 let expanded_struct_info = expand_nested_structs(pending_gen.struct_info)?;
@@ -182,10 +182,10 @@ fn try_process_pending_generations() -> syn::Result<()> {
                 remaining_pending.push(pending_gen);
             }
         }
-        
+
         *pending_list = remaining_pending;
     }
-    
+
     // Remove empty entries to keep the map clean
     file_pending.retain(|_, pending_list| !pending_list.is_empty());
 
@@ -212,27 +212,27 @@ struct FieldInfo {
     group: String,
 }
 
-/// Clap attributes for a field 
+/// Clap attributes for a field
 #[derive(Debug, Clone, Default)]
 struct ClapAttrs {
     // Value attributes
     default_value: Option<String>,
     default_value_t: Option<String>,
-    
+
     // Naming attributes
     rename: Option<String>,
     long: Option<String>,
     short: Option<char>,
-    
+
     // Behavioral flags
     flatten: bool,
     required: bool,
     skip: bool,
-    
+
     // Documentation attributes
     help: Option<String>,
     about: Option<String>,
-    
+
     // Environment binding
     env: Option<String>,
 }
@@ -351,7 +351,7 @@ fn parse_field_info(field: &Field, parent_struct: &str) -> syn::Result<FieldInfo
 /// Parse clap attributes for a field
 fn parse_field_clap_attrs(attrs: &[Attribute]) -> syn::Result<ClapAttrs> {
     let mut clap_attrs = ClapAttrs::default();
-    
+
     for attr in attrs {
         if attr.path().is_ident("clap") {
             match &attr.meta {
@@ -367,26 +367,26 @@ fn parse_field_clap_attrs(attrs: &[Attribute]) -> syn::Result<ClapAttrs> {
             }
         }
     }
-    
+
     Ok(clap_attrs)
 }
 
 /// Parse a clap meta list like #[clap(flatten, default_value = "test")]
 fn parse_clap_meta_list(attrs: &mut ClapAttrs, list: &MetaList) -> syn::Result<()> {
     let nested_metas = darling::ast::NestedMeta::parse_meta_list(list.tokens.clone())?;
-    
+
     for nested_meta in nested_metas {
         match nested_meta {
             darling::ast::NestedMeta::Meta(meta) => parse_clap_meta(attrs, &meta)?,
             darling::ast::NestedMeta::Lit(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
-                    "unexpected literal in clap attribute"
+                    "unexpected literal in clap attribute",
                 ));
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -401,26 +401,27 @@ fn parse_clap_meta(attrs: &mut ClapAttrs, meta: &Meta) -> syn::Result<()> {
 
 /// Parse clap flag attributes like `flatten`, `required`, `skip`
 fn parse_clap_flag(attrs: &mut ClapAttrs, path: &Path) -> syn::Result<()> {
-    let ident = path.get_ident().ok_or_else(|| {
-        syn::Error::new_spanned(path, "expected simple identifier")
-    })?;
-    
+    let ident = path
+        .get_ident()
+        .ok_or_else(|| syn::Error::new_spanned(path, "expected simple identifier"))?;
+
     match ident.to_string().as_str() {
         "flatten" => attrs.flatten = true,
         "required" => attrs.required = true,
         "skip" => attrs.skip = true,
         _ => {}
     }
-    
+
     Ok(())
 }
 
 /// Parse clap name-value attributes like `env = "VAR"`, `default_value = "test"`
 fn parse_clap_name_value_meta(attrs: &mut ClapAttrs, nv: &MetaNameValue) -> syn::Result<()> {
-    let name = nv.path.get_ident().ok_or_else(|| {
-        syn::Error::new_spanned(&nv.path, "expected simple identifier")
-    })?;
-    
+    let name = nv
+        .path
+        .get_ident()
+        .ok_or_else(|| syn::Error::new_spanned(&nv.path, "expected simple identifier"))?;
+
     match name.to_string().as_str() {
         "long" => attrs.long = Some(parse_string_value(&nv.value)?),
         "short" => attrs.short = Some(parse_char_value(&nv.value)?),
@@ -432,7 +433,7 @@ fn parse_clap_name_value_meta(attrs: &mut ClapAttrs, nv: &MetaNameValue) -> syn:
         "rename" => attrs.rename = Some(parse_string_value(&nv.value)?),
         _ => {}
     }
-    
+
     Ok(())
 }
 
@@ -447,17 +448,18 @@ fn parse_clap_name_value(_attrs: &mut ClapAttrs, _nv: &MetaNameValue) -> syn::Re
 fn parse_clap_nested_list(_attrs: &mut ClapAttrs, list: &MetaList) -> syn::Result<()> {
     Err(syn::Error::new_spanned(
         list,
-        "nested lists not supported in clap attributes"
+        "nested lists not supported in clap attributes",
     ))
 }
 
 /// Parse string literal value
 fn parse_string_value(expr: &Expr) -> syn::Result<String> {
     match expr {
-        Expr::Lit(ExprLit { lit: Lit::Str(lit_str), .. }) => {
-            Ok(lit_str.value())
-        }
-        _ => Err(syn::Error::new_spanned(expr, "expected string literal"))
+        Expr::Lit(ExprLit {
+            lit: Lit::Str(lit_str),
+            ..
+        }) => Ok(lit_str.value()),
+        _ => Err(syn::Error::new_spanned(expr, "expected string literal")),
     }
 }
 
@@ -467,7 +469,7 @@ fn parse_char_value(expr: &Expr) -> syn::Result<char> {
     let mut chars = s.chars();
     match (chars.next(), chars.next()) {
         (Some(c), None) => Ok(c),
-        _ => Err(syn::Error::new_spanned(expr, "expected single character"))
+        _ => Err(syn::Error::new_spanned(expr, "expected single character")),
     }
 }
 
@@ -475,7 +477,6 @@ fn parse_char_value(expr: &Expr) -> syn::Result<char> {
 fn parse_expr_value(expr: &Expr) -> syn::Result<String> {
     Ok(quote!(#expr).to_string())
 }
-
 
 /// Extract documentation comment from attributes
 fn extract_doc_comment(attrs: &[Attribute]) -> Option<String> {
